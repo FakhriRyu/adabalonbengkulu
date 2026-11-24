@@ -33,6 +33,27 @@
   }
 }
 
+/* Bottom sheet (components/admin/BottomSheet.tsx) */
+dialog.sheet[open] {
+  animation: sheet-up 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+dialog.sheet[open]::backdrop {
+  animation: sheet-fade 0.2s ease-out;
+}
+html:has(dialog.sheet[open]) {
+  overflow: hidden;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+
 @layer components {
   /* Gingham / checkered background like the Instagram catalog */
   .bg-gingham {

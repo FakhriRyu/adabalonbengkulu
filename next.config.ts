@@ -8,7 +8,16 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "lh3.googleusercontent.com",
       },
+      // foto produk yang diunggah dari admin (Vercel Blob)
+      {
+        protocol: "https",
+        hostname: "*.public.blob.vercel-storage.com",
+      },
     ],
+  },
+  experimental: {
+    // unggah foto produk lewat Server Action (batas bawaan 1 MB)
+    serverActions: { bodySizeLimit: "5mb" },
   },
 };
 

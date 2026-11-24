@@ -1,7 +1,6 @@
 import {
   boolean,
   date,
-  doublePrecision,
   index,
   integer,
   pgEnum,
@@ -17,7 +16,6 @@ export const petalStyle = pgEnum("petal_style", ["simple", "curly", "plain"]);
 export const palette = pgEnum("palette", ["pastel", "chrome"]);
 export const colorGroup = pgEnum("color_group", ["petal_pastel", "petal_chrome", "stem", "ribbon"]);
 export const productTheme = pgEnum("product_theme", ["blue", "pink", "teal"]);
-export const recipeScope = pgEnum("recipe_scope", ["stem", "bouquet"]);
 export const orderStatus = pgEnum("order_status", ["baru", "diproses", "siap", "selesai", "batal"]);
 export const transactionType = pgEnum("transaction_type", ["masuk", "keluar"]);
 
@@ -62,9 +60,6 @@ export const products = pgTable("products", {
   theme: productTheme("theme").notNull().default("blue"),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
-  /** opsional: dipakai untuk menghitung HPP produk katalog */
-  flowerTypeId: text("flower_type_id").references(() => flowerTypes.id, { onDelete: "set null" }),
-  stemCount: integer("stem_count"),
   createdAt: createdAt(),
 });
 
@@ -72,34 +67,6 @@ export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
-
-export const materials = pgTable("materials", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  /** satuan pakai: pcs, meter, lembar, ... */
-  unit: text("unit").notNull(),
-  /** harga beli satu kemasan */
-  packPrice: integer("pack_price").notNull(),
-  /** isi satu kemasan dalam satuan pakai */
-  packQty: doublePrecision("pack_qty").notNull(),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: createdAt(),
-});
-
-export const recipeItems = pgTable(
-  "recipe_items",
-  {
-    id: text("id").primaryKey(),
-    /** stem = per tangkai suatu jenis bunga; bouquet = kemasan per buket */
-    scope: recipeScope("scope").notNull(),
-    flowerTypeId: text("flower_type_id").references(() => flowerTypes.id, { onDelete: "cascade" }),
-    materialId: text("material_id")
-      .notNull()
-      .references(() => materials.id, { onDelete: "restrict" }),
-    qty: doublePrecision("qty").notNull(),
-  },
-  (t) => [index("recipe_items_type_idx").on(t.flowerTypeId)],
-);
 
 export const orders = pgTable(
   "orders",
@@ -112,9 +79,7 @@ export const orders = pgTable(
     orderDate: date("order_date").notNull(),
     pickupDate: date("pickup_date"),
     status: orderStatus("status").notNull().default("baru"),
-    discount: integer("discount").notNull().default(0),
-    shippingFee: integer("shipping_fee").notNull().default(0),
-    /** total akhir yang dibayar pelanggan (item - diskon + ongkir) */
+    /** total yang dibayar pelanggan (jumlah harga item) */
     total: integer("total").notNull(),
     isPaid: boolean("is_paid").notNull().default(false),
     paidAt: date("paid_at"),
@@ -137,10 +102,6 @@ export const orderItems = pgTable(
     qty: integer("qty").notNull(),
     /** snapshot harga jual per unit saat pesanan dibuat */
     unitPrice: integer("unit_price").notNull(),
-    /** snapshot HPP per unit saat pesanan dibuat */
-    unitCost: integer("unit_cost").notNull().default(0),
-    /** snapshot biaya kemasan untuk baris ini (sekali per buket) */
-    extraCost: integer("extra_cost").notNull().default(0),
     petalColor: text("petal_color"),
     stemColor: text("stem_color"),
     ribbonColor: text("ribbon_color"),

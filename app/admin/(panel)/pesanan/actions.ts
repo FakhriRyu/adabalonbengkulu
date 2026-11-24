@@ -4,12 +4,10 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
-import { emptyToNull, fail, invalid, ok, optionalText, refreshAdmin, requiredText, rupiah, rupiahOrZero, type ActionState } from "@/lib/admin/action";
-import { loadCostTable } from "@/lib/admin/costs";
+import { emptyToNull, fail, invalid, ok, optionalText, refreshAdmin, requiredText, rupiah, type ActionState } from "@/lib/admin/action";
 import { requireAdmin } from "@/lib/auth/dal";
 import { isIsoDate, todayWIB } from "@/lib/dates";
-import { bouquetCost } from "@/lib/hpp";
-import { ORDER_STATUSES, itemsSubtotal, orderTotal, type OrderStatus } from "@/lib/orders";
+import { ORDER_STATUSES, itemsSubtotal, orderNo, type OrderStatus } from "@/lib/orders";
 
 const { orders, orderItems, flowerTypes, colors, products } = schema;
 
@@ -20,8 +18,6 @@ const headerSchema = z.object({
   customerPhone: optionalText("No. HP", 30),
   orderDate: isoDate("Tanggal pesan"),
   pickupDate: z.preprocess(emptyToNull, isoDate("Tanggal ambil").nullable().default(null)),
-  discount: rupiahOrZero("Diskon"),
-  shippingFee: rupiahOrZero("Ongkir"),
   note: optionalText("Catatan", 500),
 });
 
@@ -43,7 +39,6 @@ const itemSchema = z.discriminatedUnion("kind", [
     description: requiredText("Keterangan item", 120),
     qty,
     unitPrice: rupiah("Harga"),
-    unitCost: rupiahOrZero("HPP"),
   }),
 ]);
 const itemsSchema = z.array(itemSchema).min(1, "Tambahkan minimal satu item.").max(30, "Maksimal 30 item per pesanan.");
@@ -51,11 +46,10 @@ const itemsSchema = z.array(itemSchema).min(1, "Tambahkan minimal satu item.").m
 type ItemInput = z.infer<typeof itemSchema>;
 type ItemRow = typeof orderItems.$inferInsert;
 
-/** Ubah isian form menjadi baris item dengan snapshot nama, warna, dan HPP saat ini. */
+/** Ubah isian form menjadi baris item dengan snapshot nama dan warna saat ini. */
 async function buildItems(orderId: string, input: ItemInput[]): Promise<ItemRow[] | string> {
   const db = getDb();
-  const [{ table }, typeRows, colorRows, productRows] = await Promise.all([
-    loadCostTable(),
+  const [typeRows, colorRows, productRows] = await Promise.all([
     db.select().from(flowerTypes),
     db.select().from(colors),
     db.select().from(products),
@@ -77,8 +71,6 @@ async function buildItems(orderId: string, input: ItemInput[]): Promise<ItemRow[
         ...base,
         description: `${t.name} · ${it.qty} tangkai`,
         flowerTypeId: t.id,
-        unitCost: Math.round(table.stemCost(t.id)),
-        extraCost: Math.round(table.bouquetCost),
         petalColor: petal.name,
         stemColor: stem.name,
         ribbonColor: ribbon.name,
@@ -86,14 +78,9 @@ async function buildItems(orderId: string, input: ItemInput[]): Promise<ItemRow[
     } else if (it.kind === "katalog") {
       const p = product.get(it.productId);
       if (!p) return `Item ${i + 1}: produk sudah tidak ada. Muat ulang halaman.`;
-      rows.push({
-        ...base,
-        description: p.name,
-        productId: p.id,
-        unitCost: p.flowerTypeId && p.stemCount ? bouquetCost(table, p.flowerTypeId, p.stemCount) : 0,
-      });
+      rows.push({ ...base, description: p.name, productId: p.id });
     } else {
-      rows.push({ ...base, description: it.description, unitCost: it.unitCost });
+      rows.push({ ...base, description: it.description });
     }
   }
   return rows;
@@ -121,31 +108,35 @@ export async function createOrder(formData: FormData): Promise<ActionState> {
   if (typeof rows === "string") return fail(rows);
 
   const h = header.data;
-  const total = orderTotal(itemsSubtotal(items.data), h.discount, h.shippingFee);
-  if (total < 0) return fail("Diskon lebih besar dari total belanja.");
+  const total = itemsSubtotal(items.data);
 
   const db = getDb();
-  await db.batch([
-    db.insert(orders).values({ id, ...h, status, total, isPaid, paidAt: isPaid ? h.orderDate : null }),
+  const [[created]] = await db.batch([
+    db.insert(orders).values({ id, ...h, status, total, isPaid, paidAt: isPaid ? h.orderDate : null }).returning({ no: orders.no }),
     db.insert(orderItems).values(rows),
   ]);
   refreshAdmin();
-  redirect(`/admin/pesanan/${id}`);
+  return { ok: true, created: { id, label: `Pesanan ${orderNo(created.no)}` } };
 }
 
-/** Ubah data pelanggan, tanggal, diskon, ongkir, catatan. Item tidak diubah supaya snapshot HPP tetap. */
-export async function updateOrder(formData: FormData): Promise<ActionState> {
+/** Isian yang bisa diubah langsung di detail pesanan. Item tidak bisa diubah supaya snapshot harga tetap. */
+const fieldSchemas = {
+  customerName: headerSchema.shape.customerName,
+  customerPhone: headerSchema.shape.customerPhone,
+  orderDate: headerSchema.shape.orderDate,
+  pickupDate: z.preprocess(emptyToNull, isoDate("Tanggal ambil").nullable()),
+  note: headerSchema.shape.note,
+};
+export type OrderField = keyof typeof fieldSchemas;
+
+/** Simpan satu isian pesanan, dipanggil saat isian di detail pesanan selesai diubah. */
+export async function updateOrderField(id: string, field: OrderField, value: string): Promise<ActionState> {
   await requireAdmin();
-  const id = String(formData.get("id") ?? "");
-  const header = headerSchema.safeParse(Object.fromEntries(formData));
-  if (!header.success) return invalid(header.error);
-  const db = getDb();
-  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
-  if (items.length === 0) return fail("Pesanan tidak ditemukan.");
-  const h = header.data;
-  const total = orderTotal(itemsSubtotal(items), h.discount, h.shippingFee);
-  if (total < 0) return fail("Diskon lebih besar dari total belanja.");
-  await db.update(orders).set({ ...h, total }).where(eq(orders.id, id));
+  if (!Object.hasOwn(fieldSchemas, field)) return fail("Isian tidak dikenal.");
+  const parsed = fieldSchemas[field].safeParse(value);
+  if (!parsed.success) return invalid(parsed.error);
+  const [row] = await getDb().update(orders).set({ [field]: parsed.data }).where(eq(orders.id, id)).returning({ id: orders.id });
+  if (!row) return fail("Pesanan tidak ditemukan.");
   refreshAdmin();
   return ok;
 }

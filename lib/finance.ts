@@ -1,10 +1,7 @@
 // Ringkasan keuangan bulanan. Murni, diuji di lib/finance.test.ts.
-import { itemsCost, orderProfit, type PricedLine } from "./orders.ts";
 
 export interface PaidOrder {
   total: number;
-  shippingFee: number;
-  items: Pick<PricedLine, "qty" | "unitCost" | "extraCost">[];
 }
 
 export interface Txn {
@@ -19,8 +16,6 @@ export interface MonthSummary {
   expense: number;
   /** arus kas bersih: semua masuk dikurangi semua keluar */
   net: number;
-  /** laba kotor perkiraan dari pesanan lunas (harga jual - HPP). Bukan bagian dari arus kas. */
-  grossProfit: number;
   paidOrders: number;
 }
 
@@ -35,7 +30,6 @@ export function summarize(paidOrders: PaidOrder[], txns: Txn[]): MonthSummary {
     otherIncome,
     expense,
     net: orderIncome + otherIncome - expense,
-    grossProfit: sum(paidOrders.map((o) => orderProfit(o, itemsCost(o.items)))),
     paidOrders: paidOrders.length,
   };
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, asc, count, eq, inArray, lte, sum } from "drizzle-orm";
-import { ArrowRight, Plus, TriangleAlert } from "lucide-react";
+import { ArrowRight, TriangleAlert } from "lucide-react";
 import { Stat } from "@/components/admin/Stat";
 import { Badge, Card } from "@/components/admin/ui";
 import { formatRupiah } from "@/data/products";
@@ -65,12 +65,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h1 className="text-3xl font-extrabold text-brand-deep">Dashboard</h1>
-        <Link href="/admin/pesanan/baru" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 font-display font-extrabold text-white hover:bg-brand-dark">
-          <Plus className="h-5 w-5" aria-hidden /> Pesanan baru
-        </Link>
-      </div>
+      <h1 className="text-3xl font-extrabold text-brand-deep">Dashboard</h1>
 
       <section aria-labelledby="active-heading">
         <h2 id="active-heading" className="mb-2 text-lg font-extrabold text-brand-deep">Pesanan aktif</h2>
@@ -118,11 +113,10 @@ export default async function DashboardPage() {
           <h2 id="month-heading" className="text-lg font-extrabold text-brand-deep">{formatMonth(today.slice(0, 7))}</h2>
           <Link href="/admin/keuangan" className="text-sm font-bold text-brand hover:text-brand-dark">Detail keuangan</Link>
         </div>
-        <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Stat label="Pemasukan" value={month.summary.orderIncome + month.summary.otherIncome} tone="in" hint={`${month.summary.paidOrders} pesanan lunas`} />
           <Stat label="Pengeluaran" value={month.summary.expense} tone="out" />
           <Stat label="Arus kas bersih" value={month.summary.net} tone="net" />
-          <Stat label="Laba kotor (perkiraan)" value={month.summary.grossProfit} hint="Harga jual − HPP" />
         </dl>
       </section>
     </div>

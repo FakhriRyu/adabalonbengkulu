@@ -34,24 +34,28 @@ export function waNumber(phone: string): string | null {
 export interface PricedLine {
   qty: number;
   unitPrice: number;
-  /** HPP per unit */
-  unitCost: number;
-  /** biaya tambahan sekali per baris (kemasan buket) */
-  extraCost: number;
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
-export const lineSubtotal = (l: Pick<PricedLine, "qty" | "unitPrice">) => l.qty * l.unitPrice;
-export const lineCost = (l: Pick<PricedLine, "qty" | "unitCost" | "extraCost">) => l.qty * l.unitCost + l.extraCost;
-export const itemsSubtotal = (lines: Pick<PricedLine, "qty" | "unitPrice">[]) => sum(lines.map(lineSubtotal));
-export const itemsCost = (lines: Pick<PricedLine, "qty" | "unitCost" | "extraCost">[]) => sum(lines.map(lineCost));
+export const lineSubtotal = (l: PricedLine) => l.qty * l.unitPrice;
+export const itemsSubtotal = (lines: PricedLine[]) => sum(lines.map(lineSubtotal));
 
-/** Total yang dibayar pelanggan. */
-export const orderTotal = (subtotal: number, discount: number, shippingFee: number) => subtotal - discount + shippingFee;
+/** "Ayesha Malik" -> "AM", "fatia" -> "F" */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+}
 
-/**
- * Laba kotor perkiraan: pendapatan dari item (setelah diskon) dikurangi HPP.
- * Ongkir tidak dihitung sebagai pendapatan karena biasanya diteruskan ke kurir.
- */
-export const orderProfit = (o: { total: number; shippingFee: number }, cost: number) => o.total - o.shippingFee - cost;
+/** Indeks warna avatar (0..count-1); nama yang sama selalu dapat warna yang sama. */
+export function avatarTone(name: string, count: number): number {
+  let h = 0;
+  for (const ch of name.trim().toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % count;
+}
+
+/** Ringkasan isi pesanan untuk daftar: item pertama, plus jumlah item lain. */
+export function itemSummary(items: { description: string }[]): string {
+  if (items.length === 0) return "Tanpa item";
+  return items.length === 1 ? items[0].description : `${items[0].description} +${items.length - 1} lainnya`;
+}

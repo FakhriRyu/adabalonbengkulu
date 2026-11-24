@@ -1,18 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { itemsCost, itemsSubtotal, orderNo, orderProfit, orderTotal, waNumber } from "./orders.ts";
+import { avatarTone, initials, itemSummary, itemsSubtotal, orderNo, waNumber } from "./orders.ts";
 
 const lines = [
-  { qty: 5, unitPrice: 20000, unitCost: 2500, extraCost: 1000 }, // buket 5 tangkai + kemasan
-  { qty: 2, unitPrice: 15000, unitCost: 4000, extraCost: 0 }, // 2 produk katalog
+  { qty: 5, unitPrice: 20000 }, // buket 5 tangkai
+  { qty: 2, unitPrice: 15000 }, // 2 produk katalog
 ];
 
-test("subtotal, HPP, total, dan laba pesanan", () => {
+test("total pesanan = jumlah harga item", () => {
   assert.equal(itemsSubtotal(lines), 130000);
-  assert.equal(itemsCost(lines), 5 * 2500 + 1000 + 2 * 4000);
-  const total = orderTotal(130000, 10000, 15000);
-  assert.equal(total, 135000);
-  assert.equal(orderProfit({ total, shippingFee: 15000 }, itemsCost(lines)), 120000 - 21500);
 });
 
 test("orderNo diberi nol di depan", () => {
@@ -25,4 +21,22 @@ test("waNumber menormalkan nomor Indonesia", () => {
   assert.equal(waNumber("+62 812 3456 7890"), "6281234567890");
   assert.equal(waNumber("123"), null);
   assert.equal(waNumber(""), null);
+});
+
+test("initials dari nama pelanggan", () => {
+  assert.equal(initials("Ayesha Malik"), "AM");
+  assert.equal(initials("  fatia "), "F");
+  assert.equal(initials("Siti Nur Aisyah"), "SN");
+  assert.equal(initials(""), "?");
+});
+
+test("avatarTone tetap untuk nama yang sama", () => {
+  assert.equal(avatarTone("Fiqri", 5), avatarTone(" fiqri ", 5));
+  assert.ok(avatarTone("Aini", 5) < 5);
+});
+
+test("itemSummary meringkas isi pesanan", () => {
+  assert.equal(itemSummary([]), "Tanpa item");
+  assert.equal(itemSummary([{ description: "Kelopak Simple · 3 tangkai" }]), "Kelopak Simple · 3 tangkai");
+  assert.equal(itemSummary([{ description: "A" }, { description: "B" }, { description: "C" }]), "A +2 lainnya");
 });

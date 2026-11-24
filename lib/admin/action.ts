@@ -1,10 +1,15 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { parseDecimal, parseRupiah } from "@/lib/format";
+import { parseRupiah } from "@/lib/format";
 
 /** Hasil Server Action untuk form admin. */
-export type ActionState = { ok?: boolean; error?: string };
+export type ActionState = {
+  ok?: boolean;
+  error?: string;
+  /** data yang baru dibuat, untuk notifikasi "tersimpan · Lihat" */
+  created?: { id: string; label: string };
+};
 
 export const ok: ActionState = { ok: true };
 export const fail = (error: string): ActionState => ({ error });
@@ -18,7 +23,7 @@ export function refresh() {
   refreshAdmin();
 }
 
-/** Segarkan halaman admin saja (pesanan, HPP, keuangan tidak tampil di toko). */
+/** Segarkan halaman admin saja (pesanan dan keuangan tidak tampil di toko). */
 export function refreshAdmin() {
   revalidatePath("/admin", "layout");
 }
@@ -40,14 +45,3 @@ export const rupiah = (label: string, max = 100_000_000) =>
 
 /** String kosong dari <select>/<input> opsional menjadi null. */
 export const emptyToNull = (v: unknown) => (typeof v === "string" && v.trim() === "" ? null : v);
-
-/** Angka pecahan positif, menerima "1,5" atau "1.5". */
-export const positiveDecimal = (label: string, max = 100_000) =>
-  z.preprocess(
-    parseDecimal,
-    z.number({ error: `${label} harus berupa angka.` }).positive(`${label} harus lebih dari 0.`).max(max, `${label} terlalu besar.`),
-  );
-
-/** Rupiah opsional: kosong berarti 0. */
-export const rupiahOrZero = (label: string, max?: number) =>
-  z.preprocess((v) => (v === undefined || v === null || (typeof v === "string" && v.trim() === "") ? "0" : v), rupiah(label, max));

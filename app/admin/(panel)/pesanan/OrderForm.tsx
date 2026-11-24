@@ -8,11 +8,12 @@ import { calcTotal } from "@/data/builder";
 import { formatRupiah } from "@/data/products";
 import type { ActionState } from "@/lib/admin/action";
 import { parseRupiah } from "@/lib/format";
-import { ORDER_STATUSES, STATUS_LABEL, itemsCost, itemsSubtotal, orderProfit, orderTotal } from "@/lib/orders";
+import { ORDER_STATUSES, STATUS_LABEL, itemsSubtotal } from "@/lib/orders";
 
-export interface TypeOpt { id: string; name: string; pricePerStem: number; chrome: boolean; stemCost: number }
+export interface TypeOpt { id: string; name: string; pricePerStem: number; chrome: boolean }
 export interface ColorOpt { id: string; name: string; hex: string; surcharge: number; group: string; isReady: boolean }
-export interface ProductOpt { id: string; name: string; price: number; cost: number }
+export interface ProductOpt { id: string; name: string; price: number }
+export interface OrderOptions { types: TypeOpt[]; colors: ColorOpt[]; products: ProductOpt[]; today: string }
 
 type Kind = "rakit" | "katalog" | "lain";
 interface Line {
@@ -26,7 +27,6 @@ interface Line {
   ribbonColorId: string;
   productId: string;
   description: string;
-  unitCost: string;
 }
 
 const num = (s: string) => parseRupiah(s) ?? 0;
@@ -34,18 +34,12 @@ const intQty = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
 
 export default function OrderForm({
   action,
-  types,
-  colors,
-  products,
-  packagingCost,
-  today,
+  options: { types, colors, products, today },
+  onSuccess,
 }: {
   action: (fd: FormData) => Promise<ActionState>;
-  types: TypeOpt[];
-  colors: ColorOpt[];
-  products: ProductOpt[];
-  packagingCost: number;
-  today: string;
+  options: OrderOptions;
+  onSuccess?: (result: ActionState) => void;
 }) {
   const inGroup = (g: string) => colors.filter((c) => c.group === g);
   const firstReady = (g: string) => (inGroup(g).find((c) => c.isReady) ?? inGroup(g)[0])?.id ?? "";
@@ -72,7 +66,6 @@ export default function OrderForm({
       ribbonColorId: firstReady("ribbon"),
       productId: products[0]?.id ?? "",
       description: "",
-      unitCost: "0",
     };
     if (kind === "rakit") base.unitPrice = String(rakitPrice(base));
     if (kind === "katalog") base.unitPrice = String(products[0]?.price ?? 0);
@@ -80,8 +73,6 @@ export default function OrderForm({
   }
 
   const [lines, setLines] = useState<Line[]>(() => [newLine(types.length ? "rakit" : products.length ? "katalog" : "lain")]);
-  const [discount, setDiscount] = useState("0");
-  const [shipping, setShipping] = useState("0");
 
   function update(key: string, patch: Partial<Line>) {
     setLines((ls) =>
@@ -102,25 +93,14 @@ export default function OrderForm({
     );
   }
 
-  const priced = lines.map((l) => {
-    const qty = intQty(l.qty);
-    const unitPrice = num(l.unitPrice);
-    if (l.kind === "rakit") {
-      const stemCost = types.find((t) => t.id === l.flowerTypeId)?.stemCost ?? 0;
-      return { qty, unitPrice, unitCost: Math.round(stemCost), extraCost: Math.round(packagingCost) };
-    }
-    if (l.kind === "katalog") return { qty, unitPrice, unitCost: products.find((p) => p.id === l.productId)?.cost ?? 0, extraCost: 0 };
-    return { qty, unitPrice, unitCost: num(l.unitCost), extraCost: 0 };
-  });
-  const subtotal = itemsSubtotal(priced);
-  const total = orderTotal(subtotal, num(discount), num(shipping));
-  const cost = itemsCost(priced);
+  const priced = lines.map((l) => ({ qty: intQty(l.qty), unitPrice: num(l.unitPrice) }));
+  const total = itemsSubtotal(priced);
 
   const payload = lines.map((l) => {
     const common = { kind: l.kind, qty: l.qty, unitPrice: l.unitPrice };
     if (l.kind === "rakit") return { ...common, flowerTypeId: l.flowerTypeId, petalColorId: l.petalColorId, stemColorId: l.stemColorId, ribbonColorId: l.ribbonColorId };
     if (l.kind === "katalog") return { ...common, productId: l.productId };
-    return { ...common, description: l.description, unitCost: l.unitCost };
+    return { ...common, description: l.description };
   });
 
   const colorSelect = (label: string, group: string, value: string, onChange: (v: string) => void) => (
@@ -138,7 +118,7 @@ export default function OrderForm({
   );
 
   return (
-    <ActionForm action={action} className="space-y-4">
+    <ActionForm action={action} onSuccess={onSuccess} successText="" className="space-y-4">
       <input type="hidden" name="items" value={JSON.stringify(payload)} />
 
       <Card>
@@ -214,16 +194,8 @@ export default function OrderForm({
               <Field label={l.kind === "rakit" ? "Harga per tangkai" : "Harga satuan"}>
                 <input value={l.unitPrice} onChange={(e) => update(l.key, { unitPrice: e.target.value })} required inputMode="numeric" className={inputClass} />
               </Field>
-              {l.kind === "lain" && (
-                <Field label="HPP satuan" hint="Modal per unit, kalau ada">
-                  <input value={l.unitCost} onChange={(e) => update(l.key, { unitCost: e.target.value })} inputMode="numeric" className={inputClass} />
-                </Field>
-              )}
             </div>
-            <p className="mt-3 flex flex-wrap justify-between gap-2 text-sm font-bold text-brand-dark">
-              <span>HPP {formatRupiah(itemsCost([p]))}{l.kind === "rakit" && packagingCost > 0 ? " (termasuk kemasan)" : ""}</span>
-              <span className="text-base font-extrabold text-brand-deep">{formatRupiah(itemsSubtotal([p]))}</span>
-            </p>
+            <p className="mt-3 text-right text-base font-extrabold text-brand-deep">{formatRupiah(itemsSubtotal([p]))}</p>
           </Card>
         );
       })}
@@ -246,12 +218,6 @@ export default function OrderForm({
 
       <Card>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Diskon (Rp)">
-            <input name="discount" value={discount} onChange={(e) => setDiscount(e.target.value)} inputMode="numeric" className={inputClass} />
-          </Field>
-          <Field label="Ongkir (Rp)">
-            <input name="shippingFee" value={shipping} onChange={(e) => setShipping(e.target.value)} inputMode="numeric" className={inputClass} />
-          </Field>
           <Field label="Status">
             <select name="status" defaultValue="baru" className={inputClass}>
               {ORDER_STATUSES.map((s) => (
@@ -267,16 +233,10 @@ export default function OrderForm({
           </Field>
         </div>
 
-        <dl className="mt-4 space-y-1 rounded-xl bg-cream p-4 font-semibold text-brand-deep">
-          <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatRupiah(subtotal)}</dd></div>
-          {num(discount) > 0 && <div className="flex justify-between"><dt>Diskon</dt><dd>−{formatRupiah(num(discount))}</dd></div>}
-          {num(shipping) > 0 && <div className="flex justify-between"><dt>Ongkir</dt><dd>{formatRupiah(num(shipping))}</dd></div>}
-          <div className="flex justify-between border-t-2 border-dashed border-brand/30 pt-2 font-display text-2xl font-extrabold">
-            <dt>Total</dt><dd className="text-peach-deep">{formatRupiah(total)}</dd>
-          </div>
-          <div className="flex justify-between text-sm text-brand-dark"><dt>Perkiraan laba</dt><dd>{formatRupiah(orderProfit({ total, shippingFee: num(shipping) }, cost))}</dd></div>
+        <dl className="mt-4 flex justify-between rounded-xl bg-cream p-4 font-display text-2xl font-extrabold text-brand-deep">
+          <dt>Total</dt><dd className="text-peach-deep">{formatRupiah(total)}</dd>
         </dl>
-        <SubmitButton className="mt-4 w-full sm:w-auto">Simpan pesanan</SubmitButton>
+        <SubmitButton className="mt-4 w-full">Simpan pesanan</SubmitButton>
       </Card>
     </ActionForm>
   );

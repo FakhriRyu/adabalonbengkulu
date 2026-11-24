@@ -1,5 +1,6 @@
 "use server";
 
+import { del, put } from "@vercel/blob";
 import { count, eq, max } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -101,28 +102,49 @@ export async function deleteColor(id: string): Promise<ActionState> {
 
 // ---------- Katalog ----------
 
-const productSchema = z.object({
-  id: z.string().min(1),
+/** Isian produk yang bisa diubah langsung di panel detail produk. */
+const productFields = {
   name: requiredText("Nama produk", 60),
   tagline: optionalText("Keterangan", 120),
   price: rupiah("Harga"),
   theme: z.enum(schema.productTheme.enumValues, { error: "Pilih warna kartu." }),
-  flowerTypeId: z.preprocess(emptyToNull, z.string().nullable()),
-  stemCount: z.preprocess(
-    emptyToNull,
-    z.coerce.number({ error: "Jumlah tangkai harus berupa angka." }).int().min(1, "Jumlah tangkai minimal 1.").max(200).nullable(),
-  ),
-});
+};
+export type ProductField = keyof typeof productFields;
 
-export async function saveProduct(formData: FormData): Promise<ActionState> {
+export async function updateProductField(id: string, field: ProductField, value: string): Promise<ActionState> {
   await requireAdmin();
-  const parsed = productSchema.safeParse(Object.fromEntries(formData));
+  if (!Object.hasOwn(productFields, field)) return fail("Isian tidak dikenal.");
+  const parsed = productFields[field].safeParse(value);
   if (!parsed.success) return invalid(parsed.error);
-  const { id, ...values } = parsed.data;
-  if (Boolean(values.flowerTypeId) !== Boolean(values.stemCount)) {
-    return fail("Untuk HPP, isi jenis bunga dan jumlah tangkai dua-duanya, atau kosongkan dua-duanya.");
+  const [row] = await getDb().update(products).set({ [field]: parsed.data }).where(eq(products.id, id)).returning({ id: products.id });
+  if (!row) return fail("Produk tidak ditemukan.");
+  refresh();
+  return ok;
+}
+
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const isBlobUrl = (url: string) => /^https:\/\/[^/]+\.blob\.vercel-storage\.com\//.test(url);
+
+/** Ganti foto produk. Foto disimpan di Vercel Blob; foto lama yang juga di Blob ikut dihapus. */
+export async function uploadProductImage(id: string, formData: FormData): Promise<ActionState> {
+  await requireAdmin();
+  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID) {
+    return fail("Penyimpanan foto belum disiapkan. Hubungkan Vercel Blob ke project ini dulu.");
   }
-  await getDb().update(products).set(values).where(eq(products.id, id));
+  const file = formData.get("image");
+  if (!(file instanceof File) || file.size === 0) return fail("Pilih foto dulu.");
+  const ext = IMAGE_TYPES[file.type];
+  if (!ext) return fail("Foto harus JPG, PNG, atau WebP.");
+  if (file.size > MAX_IMAGE_BYTES) return fail("Ukuran foto maksimal 4 MB.");
+
+  const db = getDb();
+  const [current] = await db.select({ image: products.image }).from(products).where(eq(products.id, id));
+  if (!current) return fail("Produk tidak ditemukan.");
+
+  const blob = await put(`produk/${id}.${ext}`, file, { access: "public", addRandomSuffix: true, contentType: file.type });
+  await db.update(products).set({ image: blob.url }).where(eq(products.id, id));
+  if (isBlobUrl(current.image)) await del(current.image).catch(() => {});
   refresh();
   return ok;
 }

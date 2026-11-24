@@ -65,10 +65,6 @@ export default async function KeuanganPage({ searchParams }: { searchParams: Pro
         <Stat label="Pengeluaran" value={summary.expense} tone="out" />
         <Stat label="Arus kas bersih" value={summary.net} tone="net" />
       </dl>
-      <p className="mt-3 rounded-xl bg-white/70 px-4 py-3 text-sm font-semibold text-brand-dark">
-        Perkiraan laba kotor pesanan: <strong className="text-brand-deep">{formatRupiah(summary.grossProfit)}</strong> (harga jual dikurangi HPP).
-        Angka ini terpisah dari arus kas: belanja bahan sudah tercatat di pengeluaran, jadi jangan dijumlahkan.
-      </p>
 
       <Card className="mt-4">
         <details>

@@ -36,7 +36,7 @@ export default async function ProdukPage({ searchParams }: { searchParams: Promi
       <Tabs tabs={TABS} current={current} basePath="/admin/produk" />
       {current === "jenis" && <FlowerTypesTab types={typeRows} />}
       {current === "warna" && <ColorsTab colors={colorRows} />}
-      {current === "katalog" && <CatalogTab products={productRows} types={typeRows} />}
+      {current === "katalog" && <CatalogTab products={productRows} />}
       {current === "pengaturan" && <SettingsTab settings={settingRows} />}
     </>
   );

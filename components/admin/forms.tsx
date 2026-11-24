@@ -16,12 +16,14 @@ export function ActionForm({
   className,
   resetOnSuccess = false,
   successText = "Tersimpan",
+  onSuccess,
 }: {
   action: (formData: FormData) => Promise<ActionState>;
   children: ReactNode;
   className?: string;
   resetOnSuccess?: boolean;
   successText?: string;
+  onSuccess?: (result: ActionState) => void;
 }) {
   const [state, setState] = useState<ActionState>({});
   const [pending, startTransition] = useTransition();
@@ -34,6 +36,7 @@ export function ActionForm({
       const result = (await action(data)) ?? {};
       setState(result);
       if (result.ok && resetOnSuccess) form.reset();
+      if (result.ok) onSuccess?.(result);
     });
   }
 
