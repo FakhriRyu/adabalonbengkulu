@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { getDb, hasDatabase, schema } from "@/db";
 import {
   CHROME_PETALS,
@@ -38,18 +38,20 @@ const FALLBACK: Storefront = {
 };
 
 /**
- * Data yang tampil ke pelanggan: hanya jenis bunga aktif, warna ready, dan produk yang ditampilkan.
+ * Data yang tampil ke pelanggan: produk yang ditampilkan di rakit bunga / katalog, dan warna ready.
  * Tanpa DATABASE_URL (pengembangan lokal sebelum database dihubungkan) memakai data awal di data/.
  */
 export const getStorefront = cache(async (): Promise<Storefront> => {
   if (!hasDatabase()) return FALLBACK;
 
   const db = getDb();
-  const { flowerTypes, colors, products, settings } = schema;
+  const { colors, products, settings } = schema;
+  const byOrder = [asc(products.sortOrder), asc(products.createdAt)];
   const [typeRows, colorRows, productRows, settingRows] = await Promise.all([
-    db.select().from(flowerTypes).where(eq(flowerTypes.isActive, true)).orderBy(asc(flowerTypes.sortOrder), asc(flowerTypes.createdAt)),
+    db.select().from(products).where(eq(products.showInBuilder, true)).orderBy(...byOrder),
     db.select().from(colors).where(eq(colors.isReady, true)).orderBy(asc(colors.sortOrder), asc(colors.createdAt)),
-    db.select().from(products).where(eq(products.isActive, true)).orderBy(asc(products.sortOrder), asc(products.createdAt)),
+    // katalog butuh foto; produk tanpa foto tidak ditampilkan walau sakelarnya menyala
+    db.select().from(products).where(and(eq(products.showInCatalog, true), isNotNull(products.image))).orderBy(...byOrder),
     db.select().from(settings),
   ]);
 
@@ -71,7 +73,7 @@ export const getStorefront = cache(async (): Promise<Storefront> => {
       .map((t) => ({
         id: t.id,
         name: t.name,
-        desc: t.description,
+        desc: t.tagline,
         pricePerStem: t.pricePerStem,
         style: t.petalStyle,
         chrome: t.palette === "chrome",
@@ -82,7 +84,7 @@ export const getStorefront = cache(async (): Promise<Storefront> => {
     chromePetals,
     stemColors: group("stem"),
     ribbonColors: group("ribbon"),
-    products: productRows.map((p) => ({ id: p.id, name: p.name, tagline: p.tagline, price: p.price, image: p.image, theme: p.theme })),
+    products: productRows.map((p) => ({ id: p.id, name: p.name, tagline: p.tagline, price: p.price, image: p.image!, theme: p.theme })),
     minQty,
     maxQty: Math.max(minQty, setting("max_qty", MAX_QTY)),
   };

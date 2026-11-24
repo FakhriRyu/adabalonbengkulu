@@ -9,7 +9,7 @@ import { requireAdmin } from "@/lib/auth/dal";
 import { isIsoDate, todayWIB } from "@/lib/dates";
 import { ORDER_STATUSES, itemsSubtotal, orderNo, type OrderStatus } from "@/lib/orders";
 
-const { orders, orderItems, flowerTypes, colors, products } = schema;
+const { orders, orderItems, colors, products } = schema;
 
 const isoDate = (label: string) => z.string({ error: `${label} wajib diisi.` }).refine(isIsoDate, `${label} tidak valid.`);
 
@@ -49,12 +49,8 @@ type ItemRow = typeof orderItems.$inferInsert;
 /** Ubah isian form menjadi baris item dengan snapshot nama dan warna saat ini. */
 async function buildItems(orderId: string, input: ItemInput[]): Promise<ItemRow[] | string> {
   const db = getDb();
-  const [typeRows, colorRows, productRows] = await Promise.all([
-    db.select().from(flowerTypes),
-    db.select().from(colors),
-    db.select().from(products),
-  ]);
-  const type = new Map(typeRows.map((t) => [t.id, t]));
+  const [colorRows, productRows] = await Promise.all([db.select().from(colors), db.select().from(products)]);
+  const type = new Map(productRows.map((p) => [p.id, p]));
   const color = new Map(colorRows.map((c) => [c.id, c]));
   const product = new Map(productRows.map((p) => [p.id, p]));
 

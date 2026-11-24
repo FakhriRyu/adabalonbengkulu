@@ -43,20 +43,6 @@ const colorRows = (group: Group, list: ColorOption[]) =>
     sortOrder: i,
   }));
 
-if (await isEmpty(schema.flowerTypes)) {
-  await db.insert(schema.flowerTypes).values(
-    FLOWER_TYPES.map((t, i) => ({
-      id: t.id,
-      name: t.name,
-      description: t.desc,
-      pricePerStem: t.pricePerStem,
-      petalStyle: t.style,
-      palette: t.chrome ? ("chrome" as const) : ("pastel" as const),
-      sortOrder: i,
-    })),
-  );
-  console.log(`+ ${FLOWER_TYPES.length} jenis bunga`);
-} else console.log("= jenis bunga sudah ada, dilewati");
 
 if (await isEmpty(schema.colors)) {
   const rows = [
@@ -69,20 +55,32 @@ if (await isEmpty(schema.colors)) {
   console.log(`+ ${rows.length} warna`);
 } else console.log("= warna sudah ada, dilewati");
 
+// Produk katalog dan jenis bunga rakit ada di satu tabel; masing-masing tampil di satu tempat dulu.
 if (await isEmpty(schema.products)) {
-  await db.insert(schema.products).values(
-    PRODUCTS.map((p, i) => ({
+  await db.insert(schema.products).values([
+    ...PRODUCTS.map((p, i) => ({
       id: p.id,
       name: p.name,
       tagline: p.tagline,
-      price: p.price,
       image: p.image,
-      theme: p.theme,
       sortOrder: i,
+      showInCatalog: true,
+      price: p.price,
+      theme: p.theme,
     })),
-  );
-  console.log(`+ ${PRODUCTS.length} produk katalog`);
-} else console.log("= produk katalog sudah ada, dilewati");
+    ...FLOWER_TYPES.map((t, i) => ({
+      id: t.id,
+      name: t.name,
+      tagline: t.desc,
+      sortOrder: PRODUCTS.length + i,
+      showInBuilder: true,
+      pricePerStem: t.pricePerStem,
+      petalStyle: t.style,
+      palette: t.chrome ? ("chrome" as const) : ("pastel" as const),
+    })),
+  ]);
+  console.log(`+ ${PRODUCTS.length} produk katalog, ${FLOWER_TYPES.length} produk rakit`);
+} else console.log("= produk sudah ada, dilewati");
 
 if (await isEmpty(schema.settings)) {
   await db.insert(schema.settings).values([

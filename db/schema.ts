@@ -21,18 +21,6 @@ export const transactionType = pgEnum("transaction_type", ["masuk", "keluar"]);
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const flowerTypes = pgTable("flower_types", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  pricePerStem: integer("price_per_stem").notNull(),
-  petalStyle: petalStyle("petal_style").notNull().default("simple"),
-  palette: palette("palette").notNull().default("pastel"),
-  isActive: boolean("is_active").notNull().default(true),
-  sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: createdAt(),
-});
-
 export const colors = pgTable(
   "colors",
   {
@@ -51,15 +39,30 @@ export const colors = pgTable(
   (t) => [index("colors_group_idx").on(t.group)],
 );
 
+/**
+ * Produk: satu daftar untuk dua tempat tampil.
+ * - Katalog: buket jadi dengan harga per buket, foto, dan warna kartu.
+ * - Rakit bunga: jenis bunga yang dirakit pelanggan, dengan harga per tangkai, bentuk kelopak, dan palet.
+ */
 export const products = pgTable("products", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  /** keterangan singkat, tampil di kartu katalog dan pilihan rakit */
   tagline: text("tagline").notNull().default(""),
-  price: integer("price").notNull(),
-  image: text("image").notNull(),
-  theme: productTheme("theme").notNull().default("blue"),
-  isActive: boolean("is_active").notNull().default(true),
+  /** foto produk; wajib ada kalau tampil di katalog */
+  image: text("image"),
   sortOrder: integer("sort_order").notNull().default(0),
+  // --- katalog ---
+  /** kolom lama `is_active` (dulu: tampil di katalog), namanya dipertahankan */
+  showInCatalog: boolean("is_active").notNull().default(false),
+  /** harga per buket */
+  price: integer("price").notNull().default(0),
+  theme: productTheme("theme").notNull().default("blue"),
+  // --- rakit bunga ---
+  showInBuilder: boolean("show_in_builder").notNull().default(false),
+  pricePerStem: integer("price_per_stem").notNull().default(0),
+  petalStyle: petalStyle("petal_style").notNull().default("simple"),
+  palette: palette("palette").notNull().default("pastel"),
   createdAt: createdAt(),
 });
 
@@ -97,7 +100,9 @@ export const orderItems = pgTable(
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
     description: text("description").notNull(),
-    flowerTypeId: text("flower_type_id").references(() => flowerTypes.id, { onDelete: "set null" }),
+    /** produk yang dirakit per tangkai (item "rakit") */
+    flowerTypeId: text("flower_type_id").references(() => products.id, { onDelete: "set null" }),
+    /** produk katalog (item "katalog") */
     productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
     qty: integer("qty").notNull(),
     /** snapshot harga jual per unit saat pesanan dibuat */

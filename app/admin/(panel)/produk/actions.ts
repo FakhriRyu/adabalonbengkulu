@@ -1,61 +1,16 @@
 "use server";
 
-import { del, put } from "@vercel/blob";
-import { count, eq, max } from "drizzle-orm";
+import { count, eq, max, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { emptyToNull, fail, invalid, ok, optionalText, refresh, requiredText, rupiah, type ActionState } from "@/lib/admin/action";
+import { removeImage, storeImage } from "@/lib/admin/blob";
 import { requireAdmin } from "@/lib/auth/dal";
 import { isHex, isLightHex } from "@/lib/format";
 
-const { flowerTypes, colors, products, settings, orderItems } = schema;
+const { colors, products, settings, orderItems } = schema;
 
 const optionalId = z.preprocess(emptyToNull, z.string().nullable().default(null));
-
-// ---------- Jenis bunga ----------
-
-const flowerTypeSchema = z.object({
-  id: optionalId,
-  name: requiredText("Nama", 60),
-  description: optionalText("Deskripsi", 120),
-  pricePerStem: rupiah("Harga per tangkai"),
-  petalStyle: z.enum(schema.petalStyle.enumValues, { error: "Pilih bentuk kelopak." }),
-  palette: z.enum(schema.palette.enumValues, { error: "Pilih palet warna." }),
-});
-
-export async function saveFlowerType(formData: FormData): Promise<ActionState> {
-  await requireAdmin();
-  const parsed = flowerTypeSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return invalid(parsed.error);
-  const { id, ...values } = parsed.data;
-  const db = getDb();
-
-  if (id) {
-    await db.update(flowerTypes).set(values).where(eq(flowerTypes.id, id));
-  } else {
-    const [{ last }] = await db.select({ last: max(flowerTypes.sortOrder) }).from(flowerTypes);
-    await db.insert(flowerTypes).values({ id: crypto.randomUUID(), ...values, sortOrder: (last ?? -1) + 1 });
-  }
-  refresh();
-  return ok;
-}
-
-export async function setFlowerTypeActive(id: string, isActive: boolean): Promise<ActionState> {
-  await requireAdmin();
-  await getDb().update(flowerTypes).set({ isActive }).where(eq(flowerTypes.id, id));
-  refresh();
-  return ok;
-}
-
-export async function deleteFlowerType(id: string): Promise<ActionState> {
-  await requireAdmin();
-  const db = getDb();
-  const [{ used }] = await db.select({ used: count() }).from(orderItems).where(eq(orderItems.flowerTypeId, id));
-  if (used > 0) return fail("Jenis bunga ini sudah dipakai di pesanan. Nonaktifkan saja supaya riwayat tetap utuh.");
-  await db.delete(flowerTypes).where(eq(flowerTypes.id, id));
-  refresh();
-  return ok;
-}
 
 // ---------- Warna ----------
 
@@ -100,14 +55,32 @@ export async function deleteColor(id: string): Promise<ActionState> {
   return ok;
 }
 
-// ---------- Katalog ----------
+// ---------- Produk (katalog + rakit bunga) ----------
+
+/** Tambah produk baru. Belum tampil di mana pun sampai sakelarnya dinyalakan di panel detail. */
+export async function createProduct(formData: FormData): Promise<ActionState> {
+  await requireAdmin();
+  const parsed = z
+    .object({ name: requiredText("Nama produk", 60), tagline: optionalText("Keterangan", 120) })
+    .safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return invalid(parsed.error);
+  const db = getDb();
+  const [{ last }] = await db.select({ last: max(products.sortOrder) }).from(products);
+  const id = crypto.randomUUID();
+  await db.insert(products).values({ id, ...parsed.data, sortOrder: (last ?? -1) + 1 });
+  refresh();
+  return { ok: true, created: { id, label: parsed.data.name } };
+}
 
 /** Isian produk yang bisa diubah langsung di panel detail produk. */
 const productFields = {
   name: requiredText("Nama produk", 60),
   tagline: optionalText("Keterangan", 120),
-  price: rupiah("Harga"),
+  price: rupiah("Harga buket"),
   theme: z.enum(schema.productTheme.enumValues, { error: "Pilih warna kartu." }),
+  pricePerStem: rupiah("Harga per tangkai"),
+  petalStyle: z.enum(schema.petalStyle.enumValues, { error: "Pilih bentuk kelopak." }),
+  palette: z.enum(schema.palette.enumValues, { error: "Pilih palet warna." }),
 };
 export type ProductField = keyof typeof productFields;
 
@@ -116,42 +89,60 @@ export async function updateProductField(id: string, field: ProductField, value:
   if (!Object.hasOwn(productFields, field)) return fail("Isian tidak dikenal.");
   const parsed = productFields[field].safeParse(value);
   if (!parsed.success) return invalid(parsed.error);
-  const [row] = await getDb().update(products).set({ [field]: parsed.data }).where(eq(products.id, id)).returning({ id: products.id });
-  if (!row) return fail("Produk tidak ditemukan.");
+  const db = getDb();
+  const [p] = await db.select().from(products).where(eq(products.id, id));
+  if (!p) return fail("Produk tidak ditemukan.");
+  // harga yang sedang dipakai di toko tidak boleh jadi 0
+  if (field === "price" && parsed.data === 0 && p.showInCatalog) return fail("Harga buket tidak boleh 0 selama tampil di katalog.");
+  if (field === "pricePerStem" && parsed.data === 0 && p.showInBuilder) return fail("Harga per tangkai tidak boleh 0 selama tampil di rakit bunga.");
+  await db.update(products).set({ [field]: parsed.data }).where(eq(products.id, id));
   refresh();
   return ok;
 }
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-const IMAGE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
-const isBlobUrl = (url: string) => /^https:\/\/[^/]+\.blob\.vercel-storage\.com\//.test(url);
+/** Nyalakan/matikan tampil di katalog atau rakit bunga. Syarat tiap tempat dicek dulu. */
+export async function setProductShown(id: string, where: "catalog" | "builder", show: boolean): Promise<ActionState> {
+  await requireAdmin();
+  const db = getDb();
+  const [p] = await db.select().from(products).where(eq(products.id, id));
+  if (!p) return fail("Produk tidak ditemukan.");
+  if (show && where === "catalog") {
+    if (!p.image) return fail("Unggah foto dulu sebelum tampil di katalog.");
+    if (p.price <= 0) return fail("Isi harga buket dulu sebelum tampil di katalog.");
+  }
+  if (show && where === "builder" && p.pricePerStem <= 0) return fail("Isi harga per tangkai dulu sebelum tampil di rakit bunga.");
+  await db
+    .update(products)
+    .set(where === "catalog" ? { showInCatalog: show } : { showInBuilder: show })
+    .where(eq(products.id, id));
+  refresh();
+  return ok;
+}
 
 /** Ganti foto produk. Foto disimpan di Vercel Blob; foto lama yang juga di Blob ikut dihapus. */
 export async function uploadProductImage(id: string, formData: FormData): Promise<ActionState> {
   await requireAdmin();
-  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID) {
-    return fail("Penyimpanan foto belum disiapkan. Hubungkan Vercel Blob ke project ini dulu.");
-  }
-  const file = formData.get("image");
-  if (!(file instanceof File) || file.size === 0) return fail("Pilih foto dulu.");
-  const ext = IMAGE_TYPES[file.type];
-  if (!ext) return fail("Foto harus JPG, PNG, atau WebP.");
-  if (file.size > MAX_IMAGE_BYTES) return fail("Ukuran foto maksimal 4 MB.");
-
   const db = getDb();
   const [current] = await db.select({ image: products.image }).from(products).where(eq(products.id, id));
   if (!current) return fail("Produk tidak ditemukan.");
-
-  const blob = await put(`produk/${id}.${ext}`, file, { access: "public", addRandomSuffix: true, contentType: file.type });
-  await db.update(products).set({ image: blob.url }).where(eq(products.id, id));
-  if (isBlobUrl(current.image)) await del(current.image).catch(() => {});
+  const stored = await storeImage("produk", id, formData);
+  if ("error" in stored) return fail(stored.error);
+  await db.update(products).set({ image: stored.url }).where(eq(products.id, id));
+  await removeImage(current.image);
   refresh();
   return ok;
 }
 
-export async function setProductActive(id: string, isActive: boolean): Promise<ActionState> {
+export async function deleteProduct(id: string): Promise<ActionState> {
   await requireAdmin();
-  await getDb().update(products).set({ isActive }).where(eq(products.id, id));
+  const db = getDb();
+  const [{ used }] = await db
+    .select({ used: count() })
+    .from(orderItems)
+    .where(or(eq(orderItems.flowerTypeId, id), eq(orderItems.productId, id)));
+  if (used > 0) return fail("Produk ini sudah dipakai di pesanan. Matikan sakelar tampilnya saja supaya riwayat tetap utuh.");
+  const [deleted] = await db.delete(products).where(eq(products.id, id)).returning({ image: products.image });
+  await removeImage(deleted?.image);
   refresh();
   return ok;
 }
